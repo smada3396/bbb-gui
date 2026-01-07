@@ -1,137 +1,161 @@
+import io
+import zipfile
+from pathlib import Path
+from typing import List
+
 import streamlit as st
+import pandas as pd
+
+from bbb_model_predictor import BBBPredictor
 
 
-st.set_page_config(
-    page_title="BBB Permeability Studio",
-    page_icon="🧠",
-    layout="wide",
-    menu_items={
-        "Report a bug": "https://github.com/your-org/bbb-gui/issues",
-        "About": "Sparse-label multi-task learning workflow for BBB permeability modelling.",
-    },
-)
+# ---- Red Theme Palette ----
+LIGHT_ROSE = "#FADBD8"
+SOFT_RUBY = "#E57373"
+RICH_CARMINE = "#C62828"
+DEEP_CRIMSON = "#8E1C1C"
+ACCENT_BLOOD = "#7A0E0E"
+WHITE = "#FFFFFF"
+
+
+st.set_page_config(page_title="BBB Permeability Studio", page_icon="🧠", layout="wide")
+
+# Inject a compact red theme CSS
+THEME_CSS = f"""
+<style>
+.stApp {{
+    background: linear-gradient(135deg, {LIGHT_ROSE} 0%, #ffd6d6 40%, #ffecec 100%);
+}}
+.block-container {{
+    background-color: rgba(255,255,255,0.98);
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(138,43,43,0.08);
+}}
+/* Buttons */
+.stButton > button, .stDownloadButton > button {{
+    background: {RICH_CARMINE} !important;
+    color: {WHITE} !important;
+    border-radius: 999px;
+    padding: 0.4rem 1rem;
+    font-weight: 600;
+}}
+.stButton > button:hover {{
+    background: {DEEP_CRIMSON} !important;
+    transform: translateY(-1px);
+}}
+/* Sidebar */
+[data-testid="stSidebar"] {{
+    background: {ACCENT_BLOOD};
+    color: {WHITE};
+}}
+[data-testid="stSidebar"] * {{ color: {WHITE} !important; }}
+
+h1, h2, h3, h4 {{ color: {RICH_CARMINE}; }}
+
+/* File uploader: keep button text dark for contrast */
+[data-testid="stFileUploader"] button, [data-testid="stFileUploader"] button * {{ color: #000 !important; background: transparent !important; }}
+
+</style>
+"""
+st.markdown(THEME_CSS, unsafe_allow_html=True)
+
+
+def _load_predictor(artifacts_dir: str = "artifacts") -> BBBPredictor:
+    return BBBPredictor(artifacts_dir=artifacts_dir)
+
+
+def _predict_from_smiles(pred: BBBPredictor, smiles: List[str], threshold: float = 0.5) -> pd.DataFrame:
+    try:
+        df = pred.predict_proba(smiles)
+        df["bbb_label"] = (df["p_bbb_plus"] >= threshold).astype(int)
+        return df
+    except Exception as e:
+        raise
+
 
 st.title("Blood–Brain Barrier (BBB) Permeability Studio")
-st.caption(
-    "Prototype interface for the sparse-label multi-task ensemble described in the BBB manuscript."
-)
+st.caption("Upload SMILES or paste one per line — the model returns probability of BBB permeability.")
 
-st.sidebar.header("Project Snapshot")
-st.sidebar.markdown(
-    """
-    - **Model focus:** Calibrated BBB permeability classification  
-    - **Architecture:** Masked multi-task ensemble blended with a single-task baseline  
-    - **External validation:** BBBP and out-of-source (OOS) panels  
-    - **Status:** Home & documentation pages in place; ligand submission tab coming soon
-    """
-)
-st.sidebar.success("Next milestone: interactive ligand screening tab (in development).")
+with st.sidebar:
+    st.header("Controls")
+    artifacts_path = st.text_input("Artifacts folder", value="artifacts", help="Path to trained model artifacts")
+    threshold = st.slider("Classification threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+    st.markdown("---")
+    st.markdown("About: This UI runs the repository's `BBBPredictor` to score SMILES.")
 
-st.markdown(
-    """
-    ## Why this app exists
-    Drug discovery teams struggle to predict whether small molecules cross the blood–brain barrier.
-    The manuscript’s fourth tab introduces a sparse-label multi-task (MT) learning workflow that blends
-    auxiliary ADME tasks (PAMPA, PPB, efflux) with a calibrated single-task (ST) baseline. The blended
-    predictor improves both external generalization and probability calibration, addressing two recurring
-    issues in BBB screening campaigns.
-    """
-)
+tab = st.tabs(["Home", "Predict", "Documentation"])
 
-st.markdown(
-    """
-    ### Model highlights from Tab 4
-    - **Sparse-label MT training:** Each auxiliary task contributes signal only where assays exist, avoiding label deletion or imputation bias.
-    - **Stacked calibration:** MT logits are linearly blended with the ST baseline before post-hoc calibration selected on the development fold.
-    - **Reproducibility guardrails:** All tables/figures originate from `results/metrics_clean_fixed.json`, with scripted pipelines and stratified bootstraps (B = 2000).
-    """
-)
-
-st.divider()
-
-st.markdown("## Performance at a glance (Tab 4 metrics)")
-
-internal_metrics = {"PR-AUC": 0.915, "ROC-AUC": 0.864, "ΔPR-AUC vs ST": "+0.102"}
-external_metrics = [
-    {
-        "dataset": "BBBP",
-        "PR-AUC": 0.950,
-        "ΔPR-AUC vs ST": "+0.155",
-        "p-value": "< 0.001",
-    },
-    {
-        "dataset": "Out-of-source (OOS)",
-        "PR-AUC": 0.944,
-        "ΔPR-AUC vs ST": "+0.185",
-        "p-value": "< 0.001",
-    },
-]
-
-col_internal, col_ext_1, col_ext_2 = st.columns(3)
-with col_internal:
-    st.metric("Internal PR-AUC", internal_metrics["PR-AUC"], internal_metrics["ΔPR-AUC vs ST"])
-    st.metric("Internal ROC-AUC", internal_metrics["ROC-AUC"])
-
-with col_ext_1:
-    st.metric("BBBP PR-AUC", external_metrics[0]["PR-AUC"], external_metrics[0]["ΔPR-AUC vs ST"])
-    st.caption(f"One-sided ΔPR-AUC p-value {external_metrics[0]['p-value']}")
-
-with col_ext_2:
-    st.metric(
-        "OOS PR-AUC",
-        external_metrics[1]["PR-AUC"],
-        external_metrics[1]["ΔPR-AUC vs ST"],
+with tab[0]:
+    st.header("Welcome")
+    st.write(
+        "This lightweight app scores molecules for blood–brain barrier permeability using the project's pretrained ensemble."
     )
-    st.caption(f"One-sided ΔPR-AUC p-value {external_metrics[1]['p-value']}")
+    st.write("Use the Predict tab to submit SMILES or upload a CSV with a `smiles` column.")
 
-st.markdown(
-    """
-    Calibration improves alongside discrimination: the blended model reports lower Brier score and
-    expected calibration error (ECE) than the single-task baseline, with reliability diagrams approaching
-    the identity line across internal and external datasets.
-    """
-)
+with tab[2]:
+    st.header("Documentation")
+    st.markdown("- Input: SMILES strings (one per line) or CSV with `smiles` column")
+    st.markdown("- Output: `p_bbb_plus` probability, mechanistic stage-1 probs, and binary label at the chosen threshold.")
 
-st.divider()
+with tab[1]:
+    st.header("Predict — submit molecules")
 
-st.markdown("## From Tab 5: evaluation protocol & upcoming assets")
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        smiles_text = st.text_area("SMILES (one per line)")
+        uploaded = st.file_uploader("Or upload CSV (must contain `smiles` column)", type=["csv"], accept_multiple_files=False)
+    with col_b:
+        st.markdown("**Options**")
+        show_raw = st.checkbox("Show raw probabilities", value=True)
+        run_btn = st.button("Predict BBB", type="primary")
 
-tab5_col1, tab5_col2 = st.columns(2)
-with tab5_col1:
-    st.subheader("Evaluation blueprint")
-    st.markdown(
-        """
-        - **Primary metric:** Precision–recall AUC (PR-AUC); ROC-AUC reported as a secondary view.  
-        - **Uncertainty:** Stratified bootstrap (B = 2000, seed = 42) yields 95% confidence intervals and ΔPR-AUC hypothesis tests.  
-        - **Calibration checks:** Brier score, ECE, and reliability diagrams with equal-mass binning; Platt vs isotonic selected on the development fold.  
-        - **Applicability domain:** Coverage vs precision curves using ensemble variance or representation distance thresholds.  
-        """
-    )
+    smiles_list: List[str] = []
+    if uploaded is not None:
+        try:
+            df_up = pd.read_csv(uploaded)
+            if "smiles" not in df_up.columns:
+                st.error("Uploaded CSV must contain a 'smiles' column.")
+            else:
+                smiles_list = df_up["smiles"].astype(str).tolist()
+        except Exception as e:
+            st.error(f"Error reading CSV: {e}")
 
-with tab5_col2:
-    st.subheader("Assets in progress")
-    st.markdown(
-        """
-        - External & internal ROC/PR curves with confidence bands  
-        - Calibration dashboards (reliability diagrams, ΔECE summaries)  
-        - Confusion matrices at 0.5 and Youden thresholds  
-        - Feature attribution (SHAP) views for top ADME descriptors  
-        - Applicability domain plots showing precision vs coverage trade-offs  
-        """
-    )
+    if smiles_text and not smiles_list:
+        smiles_list = [s.strip() for s in smiles_text.splitlines() if s.strip()]
 
-st.info(
-    "The ligand submission workspace will surface alongside these assets. For now, use the Documentation page for setup instructions and repository structure."
-)
+    if run_btn:
+        if not smiles_list:
+            st.error("Provide at least one SMILES string before predicting.")
+        else:
+            try:
+                with st.spinner("Loading model artifacts…"):
+                    predictor = _load_predictor(artifacts_dir=artifacts_path)
+                with st.spinner("Generating predictions…"):
+                    results = _predict_from_smiles(predictor, smiles_list, threshold=threshold)
 
-st.markdown(
-    """
-    ---
-    ### Roadmap
-    1. **Current** – Communication spine: home and documentation pages summarizing the Tab 4–5 manuscript content.  
-    2. **Next** – Ligand intake tab with structure upload, descriptor generation, and model scoring.  
-    3. **Later** – Calibration overlay for user-submitted batches and automated report exports (PDF/CSV).  
-    """
-)
+                if show_raw:
+                    st.subheader("Results (probabilities)")
+                    st.dataframe(results, use_container_width=True)
+
+                # Offer CSV download
+                csv_bytes = results.to_csv(index=False).encode("utf-8")
+                st.download_button("Download results CSV", data=csv_bytes, file_name="bbb_predictions.csv")
+
+                # Offer zipped single-file per molecule (PSEUDO: create per-smiles txt)
+                mem = io.BytesIO()
+                with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for i, row in results.iterrows():
+                        name = f"mol_{i+1}.txt"
+                        txt = f"smiles: {row['smiles']}\n p_bbb_plus: {row['p_bbb_plus']:.4f}\nlabel: {int(row.get('bbb_label',0))}\n"
+                        zf.writestr(name, txt)
+                mem.seek(0)
+                st.download_button("Download per-molecule summary (ZIP)", data=mem.getvalue(), file_name="bbb_per_mol.zip")
+
+            except Exception as e:
+                st.error(f"Prediction failed: {e}")
+
+    if not run_btn and smiles_list:
+        st.info(f"Ready to predict {len(smiles_list)} molecule(s). Click 'Predict BBB' to run.")
 
 
