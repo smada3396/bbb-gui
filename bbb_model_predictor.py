@@ -13,8 +13,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from bbb_model.features import canonicalize_smiles, compute_rdkit_descriptors
-from bbb_model.utils import load_joblib, load_json
+from bbb_model_features_py import canonicalize_smiles, compute_rdkit_descriptors
+from bbb_model_utils import load_joblib, load_json
 
 
 @dataclass

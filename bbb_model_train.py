@@ -25,8 +25,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold
 
-from bbb_model.features import canonicalize_smiles, make_descriptor_matrix
-from bbb_model.utils import ensure_dir, load_labeled_csv, save_joblib, save_json
+from bbb_model_features_py import canonicalize_smiles, make_descriptor_matrix
+from bbb_model_utils import ensure_dir, load_labeled_csv, save_joblib, save_json
 
 
 @dataclass
